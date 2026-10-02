@@ -1,0 +1,18 @@
+services:
+  ai-memory:
+    image: docker.io/akitaonrails/ai-memory:latest
+    container_name: ai-memory
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:49374:49374"
+    volumes:
+      - ai-memory-data:/data
+    environment:
+      - AI_MEMORY_BASE_URL=${AI_MEMORY_BASE_URL:-http://127.0.0.1:49374}
+      - AI_MEMORY_AUTH_TOKEN=${AI_MEMORY_AUTH_TOKEN}
+      - AI_MEMORY_LLM_PROVIDER=anthropic # ou openai
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} # se aplicar
+
+volumes:
+  ai-memory-data:
+
