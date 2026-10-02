@@ -1,0 +1,11 @@
+{
+ "env": {
+    "ANTHROPIC_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "claude-sonnet-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "claude-opus-5",
+    "BASH_DEFAULT_TIMEOUT_MS": "1800000",
+    "BASH_MAX_TIMEOUT_MS": "7200000",
+    "ANTHROPIC_BASE_URL": "http://192.168.1.20:20128/v1",
+    "ANTHROPIC_API_KEY": "{file:env:ANTHROPIC_API_KEY}"
+  }
+}
