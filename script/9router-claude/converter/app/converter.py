@@ -9,30 +9,9 @@ logger = logging.getLogger("anthropic_proxy.converter")
 
 TARGET_MODELS = [
     "claude-sonnet-5",
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-5-5",
     "claude-opus-5"
 ]
-
-# O 9Router serve os próprios IDs Anthropic — mapeamento identidade.
-MODEL_ALIAS_MAP = {
-    "claude-sonnet-5": "claude-sonnet-5",
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5-20251001",
-    "claude-opus-5": "claude-opus-5"
-}
-
-
-def resolve_upstream_model(raw_model: str) -> str:
-    if raw_model in MODEL_ALIAS_MAP:
-        return MODEL_ALIAS_MAP[raw_model]
-    # IDs compostos do 9router (sec/..., kc/..., master/...) passam adiante.
-    if "/" in raw_model:
-        return raw_model
-    lowered = raw_model.lower()
-    if "haiku" in lowered:
-        return MODEL_ALIAS_MAP["claude-haiku-4-5-20251001"]
-    if "opus" in lowered:
-        return MODEL_ALIAS_MAP["claude-opus-5"]
-    return MODEL_ALIAS_MAP["claude-sonnet-5"]
 
 
 def format_system_prompt(system_val: Union[str, List[Any], None]) -> str:
@@ -143,14 +122,12 @@ def anthropic_to_openai_messages(anthropic_messages: List[Dict[str, Any]], syste
     return openai_messages
 
 def anthropic_to_openai_request(anthropic_req: Dict[str, Any]) -> Dict[str, Any]:
-    raw_model = anthropic_req.get("model", "claude-sonnet-5")
-    model = resolve_upstream_model(raw_model)
+    model = anthropic_req.get("model") or "claude-sonnet-5"
 
-        
     system_prompt = format_system_prompt(anthropic_req.get("system"))
     raw_messages = anthropic_req.get("messages", [])
-    
-    logger.info(f"Converting Anthropic request for client model: '{raw_model}' -> mapped to upstream model: '{model}'")
+
+    logger.info(f"Converting Anthropic request (model pass-through): '{model}'")
     openai_messages = anthropic_to_openai_messages(raw_messages, system_prompt)
     
     payload = {
