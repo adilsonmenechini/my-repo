@@ -196,6 +196,7 @@ func syntheticUpstreams(baseURL, apiKey, model string) *UpstreamsConfig {
 // ResolveUpstreams carrega a config efetiva de upstreams.
 //   - UPSTREAMS_CONFIG explícito e ausente => erro (o usuário pediu um arquivo que não existe)
 //   - caminho padrão ausente                => upstream sintetizado do env, sem erro
+//     (exige GATEWAY_UPSTREAM_API_KEY, senão falha cedo como no YAML)
 func ResolveUpstreams() (*UpstreamsConfig, error) {
 	explicit := os.Getenv("UPSTREAMS_CONFIG")
 	path := explicit
@@ -205,11 +206,16 @@ func ResolveUpstreams() (*UpstreamsConfig, error) {
 	cfg, err := LoadUpstreamsConfig(path)
 	if err != nil {
 		if explicit == "" && errors.Is(err, fs.ErrNotExist) {
-			return syntheticUpstreams(
+			synth := syntheticUpstreams(
 				os.Getenv("UPSTREAM_BASE_URL"),
 				os.Getenv("GATEWAY_UPSTREAM_API_KEY"),
 				os.Getenv("DEFAULT_MODEL"),
-			), nil
+			)
+			synth.ApplyEnvOverrides()
+			if u := synth.DefaultUpstream(); strings.TrimSpace(u.APIKey) == "" {
+				return nil, fmt.Errorf("upstream %q: api_key is required for the default upstream", u.Name)
+			}
+			return synth, nil
 		}
 		return nil, err
 	}

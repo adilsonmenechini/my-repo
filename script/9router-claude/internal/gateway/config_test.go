@@ -214,6 +214,7 @@ func TestResolveUpstreamsSynthesizesWhenDefaultPathMissing(t *testing.T) {
 	t.Setenv("UPSTREAM_BASE_URL", "http://127.0.0.1:20338/v1/")
 	t.Setenv("GATEWAY_UPSTREAM_API_KEY", "sk-env")
 	t.Setenv("DEFAULT_MODEL", "claude-opus-5")
+	t.Setenv("GATEWAY_LISTEN_ADDR", "127.0.0.1:19998")
 	t.Chdir(t.TempDir())
 
 	cfg, err := ResolveUpstreams()
@@ -231,6 +232,20 @@ func TestResolveUpstreamsSynthesizesWhenDefaultPathMissing(t *testing.T) {
 	}
 	if cfg.DefaultModel != "claude-opus-5" {
 		t.Errorf("DefaultModel: got %q, want claude-opus-5", cfg.DefaultModel)
+	}
+	if cfg.Gateway.ListenAddr != "127.0.0.1:19998" {
+		t.Errorf("ListenAddr: got %q, want env value 127.0.0.1:19998 in the synthetic path", cfg.Gateway.ListenAddr)
+	}
+}
+
+func TestResolveUpstreamsSyntheticRequiresAPIKey(t *testing.T) {
+	t.Setenv("UPSTREAMS_CONFIG", "")
+	t.Setenv("UPSTREAM_BASE_URL", "http://127.0.0.1:20338/v1")
+	t.Setenv("GATEWAY_UPSTREAM_API_KEY", "")
+	t.Chdir(t.TempDir())
+
+	if _, err := ResolveUpstreams(); err == nil {
+		t.Fatal("expected error when the synthesized default upstream has no api_key")
 	}
 }
 
