@@ -55,7 +55,7 @@ def test_http_rejects_origin_and_validates_base():
     try:
         from fastapi.testclient import TestClient
         from app.main import app
-    except Exception as exc:  # stdlib puro: pula o teste HTTP
+    except ModuleNotFoundError as exc:  # stdlib puro (sem fastapi): pula o teste HTTP
         print(f"  (skip de teste HTTP: {exc})")
         return
     client = TestClient(app)
