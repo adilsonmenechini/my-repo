@@ -187,3 +187,103 @@ func TestRejectsNonObjectBody(t *testing.T) {
 		}
 	}
 }
+
+func TestServeModelsFromCatalog(t *testing.T) {
+	g := newTestGatewayWith(t, "http://127.0.0.1:1", Config{Upstreams: testUpstreams()})
+
+	resp := doJSON(t, baseURL(t, g)+"/v1/models", http.MethodGet, "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/models: got %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Object != "list" {
+		t.Errorf("object: got %q, want list", out.Object)
+	}
+	want := []string{"claude-sonnet-5", "claude-haiku-5-5", "gpt-4o"}
+	if len(out.Data) != len(want) {
+		t.Fatalf("data: got %d itens %v, want %v", len(out.Data), out.Data, want)
+	}
+	for i, id := range want {
+		if out.Data[i].ID != id {
+			t.Errorf("data[%d]: got %q, want %q", i, out.Data[i].ID, id)
+		}
+	}
+	if len(out.Models) != len(out.Data) {
+		t.Errorf("models: %d itens, data: %d itens (shapes precisam casar)", len(out.Models), len(out.Data))
+	}
+
+	// método errado continua 405
+	resp = doJSON(t, baseURL(t, g)+"/v1/models", http.MethodPost, "", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("POST /v1/models: got %d, want 405", resp.StatusCode)
+	}
+}
+
+func TestServeModelsDedupsAcrossUpstreams(t *testing.T) {
+	cfg := &UpstreamsConfig{
+		Upstreams: []Upstream{
+			{Name: "a", BaseURL: "http://127.0.0.1:1/v1", APIKey: "k",
+				Models: []string{"m1", "m2"}, Default: true, Timeout: 120},
+			{Name: "b", BaseURL: "http://127.0.0.1:2/v1", APIKey: "k",
+				Models: []string{"m2", "m3"}, Timeout: 120},
+		},
+		DefaultModel: "m1",
+	}
+	g := newTestGatewayWith(t, "http://127.0.0.1:1", Config{Upstreams: cfg})
+
+	resp := doJSON(t, baseURL(t, g)+"/v1/models", http.MethodGet, "", nil)
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []string{"m1", "m2", "m3"}
+	if len(out.Data) != len(want) {
+		t.Fatalf("got %v, want %v", out.Data, want)
+	}
+	for i, id := range want {
+		if out.Data[i].ID != id {
+			t.Errorf("data[%d]: got %q, want %q", i, out.Data[i].ID, id)
+		}
+	}
+}
+
+func TestServeModelsEmptyFallsBackToDefault(t *testing.T) {
+	cfg := &UpstreamsConfig{
+		Upstreams: []Upstream{
+			{Name: "env", APIKey: "k", Models: nil, Default: true, Timeout: 120},
+		},
+		DefaultModel: "claude-sonnet-5",
+	}
+	g := newTestGatewayWith(t, "http://127.0.0.1:1", Config{Upstreams: cfg})
+
+	resp := doJSON(t, baseURL(t, g)+"/v1/models", http.MethodGet, "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.Data) != 1 || out.Data[0].ID != "claude-sonnet-5" {
+		t.Errorf("catálogo vazio: got %v, want [claude-sonnet-5]", out.Data)
+	}
+}

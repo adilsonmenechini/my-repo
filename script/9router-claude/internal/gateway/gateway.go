@@ -232,7 +232,7 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		g.forward(w, r, nil)
+		g.serveModels(w)
 	case "/v1/messages/count_tokens":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -684,6 +684,49 @@ func replaceImagesInContent(content json.RawMessage) (json.RawMessage, bool, err
 		return nil, false, fmt.Errorf("encode sanitized content: %w", err)
 	}
 	return rewritten, true, nil
+}
+
+// --- catálogo ---------------------------------------------------------------
+
+// serveModels atende /v1/models com o catálogo declarado no upstreams.yaml,
+// no mesmo shape do conversor (object + data + models) para os clientes já
+// validados continuarem aceitando a resposta.
+func (g *Gateway) serveModels(w http.ResponseWriter) {
+	models := g.upstreams.AllModels()
+	if len(models) == 0 {
+		models = []string{g.defaultModel()}
+	}
+	data := make([]map[string]any, 0, len(models))
+	for _, id := range models {
+		data = append(data, modelEntry(id))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{
+		"object": "list",
+		"data":   data,
+		"models": data,
+	}); err != nil {
+		g.logger.Debug("write model catalog", "error", err)
+	}
+}
+
+func modelEntry(id string) map[string]any {
+	return map[string]any{
+		"id":           id,
+		"name":         id,
+		"model":        id,
+		"model_name":   id,
+		"display_name": id,
+		"object":       "model",
+		"type":         "model",
+		"owned_by":     "anthropic",
+		"provider":     "anthropic",
+		"created":      1700000000,
+		"capabilities": map[string]bool{
+			"completion": true, "chat": true, "stream": true,
+			"vision": true, "tools": true,
+		},
+	}
 }
 
 // --- helpers ---------------------------------------------------------------
