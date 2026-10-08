@@ -46,7 +46,11 @@ type Config struct {
 	ConverterURL string
 	// APIKey é a credencial do 9Router (GATEWAY_UPSTREAM_API_KEY), injetada no upstream.
 	APIKey string
-	Logger *slog.Logger
+	// Upstreams é a fonte de upstreams (YAML/env). Nil ⇒ sintetizado de APIKey/DefaultModel.
+	Upstreams *UpstreamsConfig
+	// DefaultModel é injetado quando o request não traz "model".
+	DefaultModel string
+	Logger       *slog.Logger
 
 	// Overrides de readiness (0 = padrão). Usados pelos testes.
 	ReadyWait time.Duration
@@ -68,6 +72,7 @@ type Gateway struct {
 	transport    *http.Transport
 	logger       *slog.Logger
 	apiKey       string
+	upstreams    *UpstreamsConfig
 	readyWait    time.Duration
 	readyPoll    time.Duration
 	readyTTL     time.Duration
@@ -99,6 +104,10 @@ func New(cfg Config) (*Gateway, error) {
 		return nil, fmt.Errorf("invalid converter URL %q", cfg.ConverterURL)
 	}
 
+	if cfg.Upstreams == nil {
+		cfg.Upstreams = syntheticUpstreams("", cfg.APIKey, cfg.DefaultModel)
+	}
+
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -109,6 +118,7 @@ func New(cfg Config) (*Gateway, error) {
 		converterURL: convURL,
 		logger:       logger,
 		apiKey:       cfg.APIKey,
+		upstreams:    cfg.Upstreams,
 		shutdown:     make(chan struct{}),
 		readyWait:    orDefault(cfg.ReadyWait, defaultReadyWait),
 		readyPoll:    orDefault(cfg.ReadyPoll, defaultReadyPoll),
@@ -215,14 +225,14 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.URL.Path {
 	case "/health": // repassado ao conversor (healthcheck do compose/test_proxy)
-		g.forward(w, r)
+		g.forward(w, r, nil)
 	case "/v1/models":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		g.forward(w, r)
+		g.forward(w, r, nil)
 	case "/v1/messages/count_tokens":
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
@@ -242,27 +252,79 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// serveMessage lê o body (limite 64 MiB), garante GetBody para o retry de
-// imagens e encaminha ao conversor.
+// serveMessage lê o body (limite 64 MiB), garante "model" e escolhe o upstream.
+// O model do cliente é sempre preservado; só um campo ausente recebe o default.
 func (g *Gateway) serveMessage(w http.ResponseWriter, r *http.Request) {
 	body, err := readRequestBody(r)
 	if err != nil {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
+	model, err := ensureModelField(&body, g.defaultModel())
+	if err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
 	setRequestBody(r, body)
-	g.forward(w, r)
+	g.forward(w, r, g.upstreams.FindUpstreamForModel(model))
 }
 
-// forward remove credenciais do cliente, injeta a do upstream e encaminha.
-func (g *Gateway) forward(w http.ResponseWriter, r *http.Request) {
+// ensureModelField garante "model" como string não-vazia no body.
+// Única reescrita do gateway: injeta defaultModel quando ausente. Valor existente
+// é sempre preservado (pass-through). Retorna o modelo usado pro roteamento.
+func ensureModelField(body *[]byte, defaultModel string) (string, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(*body, &payload); err != nil {
+		return "", fmt.Errorf("decode request body: %w", err)
+	}
+	var model string
+	if raw, ok := payload["model"]; ok {
+		if err := json.Unmarshal(raw, &model); err != nil {
+			return "", errors.New("model must be a string")
+		}
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = defaultModel
+		encoded, err := json.Marshal(model)
+		if err != nil {
+			return "", fmt.Errorf("encode default model: %w", err)
+		}
+		payload["model"] = encoded
+		rewritten, err := json.Marshal(payload)
+		if err != nil {
+			return "", fmt.Errorf("encode request body: %w", err)
+		}
+		*body = rewritten
+	}
+	return model, nil
+}
+
+func (g *Gateway) defaultModel() string {
+	if m := strings.TrimSpace(g.upstreams.DefaultModel); m != "" {
+		return m
+	}
+	return defaultModelName
+}
+
+// forward remove credenciais do cliente, injeta a do upstream escolhido e encaminha.
+// u == nil significa "sem roteamento" (ex.: /health): mantém só o fallback de Config.APIKey.
+func (g *Gateway) forward(w http.ResponseWriter, r *http.Request, u *Upstream) {
 	// Nunca repassa credencial/cookie do cliente (placeholder do Claude, sessão de browser).
 	r.Header.Del("Authorization")
 	r.Header.Del("Cookie")
 	r.Header.Del("Proxy-Authorization")
 	r.Header.Del("X-Api-Key")
-	if g.apiKey != "" {
-		r.Header.Set("Authorization", "Bearer "+g.apiKey)
+	key := g.apiKey
+	if u != nil && strings.TrimSpace(u.APIKey) != "" {
+		key = u.APIKey
+	}
+	if key != "" {
+		r.Header.Set("Authorization", "Bearer "+key)
+	}
+	if u != nil && u.BaseURL != "" {
+		r.Header.Set("X-9Router-Upstream-Base", u.BaseURL)
+		r.Header.Set("X-9Router-Upstream", u.Name)
 	}
 	r.Host = g.converterURL.Host
 
@@ -283,16 +345,9 @@ func (g *Gateway) serveCountTokens(w http.ResponseWriter, r *http.Request) {
 		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
-	var probe struct {
-		Model string `json:"model"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error",
-			fmt.Sprintf("decode token-count request: %v", err))
-		return
-	}
-	if strings.TrimSpace(probe.Model) == "" {
-		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
+	// Mesma regra do /v1/messages: model ausente recebe o default; nunca valida catálogo.
+	if _, err := ensureModelField(&body, g.defaultModel()); err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return
 	}
 	tokens := estimateCountTokens(body)
