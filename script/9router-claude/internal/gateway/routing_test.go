@@ -163,3 +163,27 @@ func TestSynthUpstreamSendsNoBaseHeader(t *testing.T) {
 		t.Errorf("Authorization: got %q, want Bearer sk-synth", v)
 	}
 }
+
+// TestRejectsNonObjectBody garante 400 Anthropic (não panic) para body que
+// não é objeto JSON: null vira nil map no unmarshal, [] e "str" já falham no decode.
+func TestRejectsNonObjectBody(t *testing.T) {
+	g := newTestGatewayWith(t, "http://127.0.0.1:1", Config{Upstreams: testUpstreams()})
+	for _, payload := range []string{`null`, `[]`, `"str"`} {
+		resp := doJSON(t, baseURL(t, g)+"/v1/messages", http.MethodPost, payload, nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %s: got %d, want 400", payload, resp.StatusCode)
+		}
+		var errResp struct {
+			Type  string `json:"type"`
+			Error struct {
+				Type string `json:"type"`
+			} `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			t.Fatalf("body %s decode: %v", payload, err)
+		}
+		if errResp.Type != "error" || errResp.Error.Type != "invalid_request_error" {
+			t.Errorf("body %s: got %+v, want anthropic invalid_request_error", payload, errResp)
+		}
+	}
+}

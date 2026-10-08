@@ -277,6 +277,11 @@ func ensureModelField(body *[]byte, defaultModel string) (string, error) {
 	if err := json.Unmarshal(*body, &payload); err != nil {
 		return "", fmt.Errorf("decode request body: %w", err)
 	}
+	if payload == nil {
+		// json.Unmarshal aceita o literal `null` sem erro e deixa o map nil;
+		// sem este guard, injetar o default panicaria ("assignment to entry in nil map").
+		return "", errors.New("request body must be a JSON object")
+	}
 	var model string
 	if raw, ok := payload["model"]; ok {
 		if err := json.Unmarshal(raw, &model); err != nil {
