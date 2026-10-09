@@ -1,0 +1,168 @@
+# Gerado por `pool create`/`pool scale` — edite o template em docker.py.
+# Projeto fixo: o nome não pode derivar do diretório, senão o compose criaria
+# um conjunto novo de volumes e abandonaria os que têm dados em /app/data.
+name: 9router-pool
+
+x-common: &common
+  restart: unless-stopped
+  stop_grace_period: 10s
+  env_file: .env.pool
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
+
+x-service-master: &service-master
+  <<: *common
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+        cpus: "1.0"
+      reservations:
+        memory: 256M
+        cpus: "0.25"
+
+x-service-slave: &service-slave
+  <<: *common
+  deploy:
+    resources:
+      limits:
+        memory: 256M
+        cpus: "0.5"
+      reservations:
+        memory: 128M
+        cpus: "0.125"
+
+services:
+  9router-master:
+    <<: *service-master
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: decolua/9router-custom
+    container_name: sbx-9router-master
+    pull_policy: missing
+    ports:
+      - "${ROUTER_PORT_MASTER:-20228}:20228"
+    volumes:
+      - 9router-master-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20228/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_MASTER:-20228}"
+      MACHINE_ID_SALT: $(openssl rand -hex 32)
+      HOSTNAME: 0.0.0.0
+      ROLE: master
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    networks:
+      - sbx-9router
+
+  9router-slave-000:
+    <<: *service-slave
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: decolua/9router-custom
+    container_name: sbx-9router-slave-000
+    pull_policy: missing
+    ports:
+      - "${ROUTER_PORT_SLAVE_000:-20129}:20129"
+    volumes:
+      - 9router-slave-000-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20129/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_SLAVE_000:-20129}"
+      HOSTNAME: 0.0.0.0
+      ROLE: slave
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      #MACHINE_ID_SALT: $(openssl rand -hex 32)
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - sbx-9router
+  9router-slave-001:
+    <<: *service-slave
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: decolua/9router-custom
+    container_name: sbx-9router-slave-001
+    pull_policy: missing
+    ports:
+      - "${ROUTER_PORT_SLAVE_001:-20130}:20130"
+    volumes:
+      - 9router-slave-001-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20130/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_SLAVE_001:-20130}"
+      HOSTNAME: 0.0.0.0
+      ROLE: slave
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      MACHINE_ID_SALT: $(openssl rand -hex 32)
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - sbx-9router
+  9router-slave-002:
+    <<: *service-slave
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: decolua/9router-custom
+    container_name: sbx-9router-slave-002
+    pull_policy: missing
+    ports:
+      - "${ROUTER_PORT_SLAVE_002:-20131}:20131"
+    volumes:
+      - 9router-slave-002-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20131/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_SLAVE_002:-20131}"
+      HOSTNAME: 0.0.0.0
+      ROLE: slave
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      MACHINE_ID_SALT: $(openssl rand -hex 32)
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - sbx-9router
+
+volumes:
+  9router-master-data:
+  9router-slave-000-data:
+  9router-slave-001-data:
+  9router-slave-002-data:
+
+networks:
+  sbx-9router:
+    name: sbx-9router
+    driver: bridge

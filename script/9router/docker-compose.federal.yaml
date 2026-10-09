@@ -1,0 +1,93 @@
+# Projeto fixo: o nome não pode derivar do diretório, senão o compose criaria
+# um conjunto novo de volumes e abandonaria os que têm dados em /app/data.
+name: 9router-federation
+
+x-common: &common
+  restart: unless-stopped
+  stop_grace_period: 10s
+  env_file: .env.federal
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+x-service-9router: &service-9router
+  <<: *common
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+        cpus: "1.0"
+      reservations:
+        memory: 256M
+        cpus: "0.25"
+
+services:
+  9router-federal:
+    <<: *service-9router
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sbx-9router-federal
+    pull_policy: always
+    ports:
+      - "${ROUTER_PORT_001:-20338}:20338"
+    volumes:
+      - 9router-federal-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20338/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_001:-20338}"
+      MACHINE_ID_SALT: $(openssl rand -hex 32)
+      HOSTNAME: 0.0.0.0
+      ROLE: master
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - sbx-9router
+
+  9router-server:
+    <<: *service-9router
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sbx-9router-002
+    pull_policy: always
+    ports:
+      - "${ROUTER_PORT_002:-20339}:20339"
+    volumes:
+      - 9router-server-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--timeout=5", "http://127.0.0.1:20338/"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    environment:
+      DATA_DIR: /app/data
+      PORT: "${ROUTER_PORT_002:-20339}"
+      MACHINE_ID_SALT: $(openssl rand -hex 32)
+      HOSTNAME: 0.0.0.0
+      ROLE: master
+      JWT_SECRET: "${JWT_SECRET:-P4s5w0rd}"
+      INITIAL_PASSWORD: "${INITIAL_PASSWORD:-123456}"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    networks:
+      - sbx-9router
+volumes:
+  9router-federal-data:
+  9router-server-data:
+
+networks:
+  sbx-9router:
+    name: sbx-9router
+    driver: bridge
