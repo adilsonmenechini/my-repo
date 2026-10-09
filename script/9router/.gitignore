@@ -1,0 +1,23 @@
+# Estado de execução da descoberta/revalidação de modelos (quarentena de probes).
+# Contém timestamps — é cache por máquina, não configuração.
+model-failures.json
+
+# Cache TTL do ProbeEngine (último resultado por modelo, por instância).
+model-state.json
+
+# Caches e venv do pool (não versionam nada disso).
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Segredos por stack. O `.gitignore` da raiz só casa com o nome exato `.env`,
+# então estes, que têm sufixo, precisam ser listados aqui.
+.env.federal
+.env.pool
+
+# Topologia local do pool (host/senha de cada instância). Nunca foi versionado
+# e não deve ser: quando a senha do router deixar de ser o default 123456, ela
+# entraria para o histórico. Exemplo versionado: config.example.json.
+config.json

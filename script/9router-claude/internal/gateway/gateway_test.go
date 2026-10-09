@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,23 +14,7 @@ import (
 
 func newTestGateway(t *testing.T, converterURL, apiKey string) *Gateway {
 	t.Helper()
-	g, err := New(Config{
-		ListenAddr:   "127.0.0.1:0",
-		ConverterURL: converterURL,
-		APIKey:       apiKey,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
-		ReadyWait:    300 * time.Millisecond,
-		ReadyPoll:    10 * time.Millisecond,
-		ReadyTTL:     time.Second,
-	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if err := g.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(func() { _ = g.Close(t.Context()) })
-	return g
+	return newTestGatewayWith(t, converterURL, Config{APIKey: apiKey})
 }
 
 func baseURL(t *testing.T, g *Gateway) string {
@@ -182,8 +165,7 @@ func TestCountTokens(t *testing.T) {
 	}
 
 	for name, payload := range map[string]string{
-		"invalid json":  `not-json`,
-		"missing model": `{"messages":[]}`,
+		"invalid json": `not-json`,
 	} {
 		resp := doJSON(t, baseURL(t, g)+"/v1/messages/count_tokens", http.MethodPost, payload, nil)
 		if resp.StatusCode != http.StatusBadRequest {
@@ -201,6 +183,12 @@ func TestCountTokens(t *testing.T) {
 		if errResp.Type != "error" || errResp.Error.Type != "invalid_request_error" {
 			t.Errorf("%s: got %+v, want anthropic invalid_request_error", name, errResp)
 		}
+	}
+
+	// model ausente agora injeta o default em vez de 400 (ver spec, Seção 3)
+	resp = doJSON(t, baseURL(t, g)+"/v1/messages/count_tokens", http.MethodPost, `{"messages":[]}`, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("missing model: got %d, want 200 (default model injected)", resp.StatusCode)
 	}
 }
 

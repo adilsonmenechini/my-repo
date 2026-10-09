@@ -20,10 +20,16 @@ func main() {
 }
 
 func run() error {
+	upstreams, err := gateway.ResolveUpstreams()
+	if err != nil {
+		return fmt.Errorf("load upstreams config: %w", err)
+	}
 	cfg := gateway.Config{
-		ListenAddr:   envOr("GATEWAY_LISTEN_ADDR", "127.0.0.1:11435"),
+		ListenAddr:   upstreams.Gateway.ListenAddr,
 		ConverterURL: os.Getenv("CONVERTER_URL"),
 		APIKey:       os.Getenv("GATEWAY_UPSTREAM_API_KEY"),
+		DefaultModel: upstreams.DefaultModel,
+		Upstreams:    upstreams,
 	}
 	if cfg.ConverterURL == "" {
 		return fmt.Errorf("CONVERTER_URL is required (ex.: http://converter:8080)")
@@ -45,11 +51,4 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return g.Close(shutdownCtx)
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

@@ -1,0 +1,27 @@
+# Imagem do watchdog lateral (serviço `9router-watch`).
+#
+# Esta imagem é só o RUNTIME — python + requests. O código e o config entram
+# por bind mount (`.:/app` no compose), porque o watchdog precisa operar a
+# MESMA árvore de trabalho que você edita: lê `config.json`, grava as
+# descobertas novas e o cache de probes (`model-state.json`,
+# `model-failures.json`, ambos gitignored). Uma cópia embutida na imagem
+# ficaria congelada no build e você mudaria o config no host sem efeito.
+#
+# Se um dia o watchdog virar serviço publicado (não local), aí vale passar a
+# copiar `src/` para dentro da imagem e a gravação para um volume nomeado.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Só uma dependência de terceiros, a mesma do `pyproject.toml`/`uv.lock`.
+# Instalada direto (sem `requirements.txt`) porque o código entra por bind
+# mount: não há build artifact para congelar, e um arquivo extra no contexto
+# só criaria mais um ponto de dessincronia.
+RUN pip install --no-cache-dir "requests>=2.34.2"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# O `user:` do compose derruba para o dono do diretório — senão o container
+# (root) deixa config.json e os caches root-owned na sua árvore.
+CMD ["python", "pool.py", "watch"]

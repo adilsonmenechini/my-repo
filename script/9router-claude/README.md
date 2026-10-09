@@ -50,6 +50,20 @@ Para valer em todo repositório, coloque as duas variáveis em `~/.claude/settin
 | `DEFAULT_MODEL` | `claude-sonnet-5` | modelo quando o cliente não envia `model` |
 | `GATEWAY_LISTEN_ADDR` | `127.0.0.1:11435` | endereço do gateway |
 | `CONVERTER_URL` | `http://127.0.0.1:8080` | conversor usado pelo gateway |
+| `UPSTREAMS_CONFIG` | `upstreams.yaml` | caminho do YAML de upstreams (opcional) |
+
+**Multi-upstream:** o gateway lê `upstreams.yaml` (fonte única: `base_url`, `api_key`,
+`models` por upstream). Sem o arquivo ele monta um upstream só a partir de
+`UPSTREAM_BASE_URL` + `GATEWAY_UPSTREAM_API_KEY`. O upstream `default` é obrigatório ter
+chave; os demais podem ficar sem (aviso no log). **Precedência:** env > YAML > hardcoded
+para `GATEWAY_LISTEN_ADDR`/`DEFAULT_MODEL` — com o YAML presente, `base_url`/`api_key` vêm
+do arquivo (a env entra via `${...}`) e `UPSTREAM_BASE_URL` alimenta só o conversor, não o
+upstream do gateway.
+
+**Modelo pass-through:** o `model` que o Claude/env manda chega ao 9Router **intocado** —
+o gateway só injeta `default_model` quando o request não traz `model`, e escolhe o upstream
+pelo `models` declarado no YAML (sem match → upstream default). `sec/…`, `master/…` etc.
+funcionam mesmo fora do catálogo `/v1/models`.
 
 ## Verificação
 

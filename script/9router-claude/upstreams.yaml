@@ -1,0 +1,35 @@
+# Configuração de upstreams do 9Router — fonte única lida pelo gateway (Go).
+# Variáveis via ${NOME_DA_ENV}: a env influencia este arquivo por expansão.
+upstreams:
+  - name: "9router-primary"
+    base_url: "http://127.0.0.1:20338/v1"
+    api_key: "${GATEWAY_UPSTREAM_API_KEY}"
+    models:
+      - "claude-sonnet-5"
+      - "claude-haiku-5-5"
+      - "claude-opus-5"
+    default: true
+    timeout: 120        # declarado, ainda ignorado (conversor fixo em 120s)
+
+  # Exemplos — descomente e crie as envs correspondentes se usar:
+  # - name: "9router-secondary"
+  #   base_url: "http://127.0.0.1:20339/v1"
+  #   api_key: "${NINEROUTER_API_KEY_2}"
+  #   models: ["gpt-4o", "gpt-4o-mini"]
+  #   default: false
+  #   timeout: 120
+  #
+  # - name: "openai-direct"
+  #   base_url: "https://api.openai.com/v1"
+  #   api_key: "${OPENAI_API_KEY}"
+  #   models: ["gpt-4o", "gpt-4o-mini", "o1-preview"]
+  #   default: false
+  #   timeout: 180
+
+# Modelo quando o cliente não envia "model" (env DEFAULT_MODEL vence este valor)
+default_model: "claude-sonnet-5"
+
+gateway:
+  listen_addr: "127.0.0.1:11435"   # env GATEWAY_LISTEN_ADDR vence
+  health_path: "/_gateway/health"
+  max_request_body_mb: 64

@@ -2,27 +2,77 @@
 import sys
 
 from app.converter import (
-    MODEL_ALIAS_MAP,
     anthropic_to_openai_request,
     openai_to_anthropic_response,
-    resolve_upstream_model,
+)
+from app.routing import (
+    InvalidUpstreamBase,
+    browser_origin_rejected,
+    resolve_upstream_base,
 )
 
 
-def test_identity_alias_map():
-    for alias, target in MODEL_ALIAS_MAP.items():
-        assert alias == target, f"{alias} -> {target} deveria ser identidade"
+def test_resolve_upstream_base_prefers_gateway_header():
+    assert resolve_upstream_base("http://127.0.0.1:20338/v1", "http://env") == "http://127.0.0.1:20338/v1"
+    assert resolve_upstream_base("http://127.0.0.1:20339/v1/", "http://env") == "http://127.0.0.1:20339/v1"
 
 
-def test_resolve_upstream_model():
-    assert resolve_upstream_model("claude-sonnet-5") == "claude-sonnet-5"
-    assert resolve_upstream_model("claude-opus-5") == "claude-opus-5"
-    assert resolve_upstream_model("claude-haiku-4-5-20251001") == "claude-haiku-4-5-20251001"
-    # IDs compostos do 9router passam adiante
-    assert resolve_upstream_model("sec/gemini/gemini-3.8-flash") == "sec/gemini/gemini-3.8-flash"
-    # nomes legados caem no fallback anthropic
-    assert resolve_upstream_model("claude-3-5-sonnet-20241022") == "claude-sonnet-5"
-    assert resolve_upstream_model("qualquer-coisa") == "claude-sonnet-5"
+def test_resolve_upstream_base_falls_back_to_env():
+    assert resolve_upstream_base(None, "http://127.0.0.1:20338/v1/") == "http://127.0.0.1:20338/v1"
+    assert resolve_upstream_base("", "http://127.0.0.1:20338/v1") == "http://127.0.0.1:20338/v1"
+
+
+def test_resolve_upstream_base_rejects_bad_scheme():
+    for bad in ("ftp://x/v1", "file:///etc/passwd", "javascript:alert(1)", "sem-esquema"):
+        try:
+            resolve_upstream_base(bad, "http://env")
+        except InvalidUpstreamBase:
+            continue
+        raise AssertionError(f"{bad!r} deveria ser rejeitado")
+
+
+def test_origin_rejected_only_when_present():
+    assert browser_origin_rejected("https://evil.example") is True
+    assert browser_origin_rejected(None) is False
+    assert browser_origin_rejected("") is False
+
+
+def test_request_passes_model_through():
+    # pass-through: o que o cliente manda chega igual no payload OpenAI
+    for wanted in ("sec/gemini/gemini-3.8-flash", "gpt-4o", "claude-haiku-5-5", "qualquer-coisa"):
+        req = anthropic_to_openai_request({
+            "model": wanted,
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "oi"}],
+        })
+        assert req["model"] == wanted, f"{wanted} -> {req['model']}"
+    # sem model: fallback do próprio conversor (modo direto)
+    req = anthropic_to_openai_request({"max_tokens": 10, "messages": [{"role": "user", "content": "oi"}]})
+    assert req["model"] == "claude-sonnet-5"
+
+
+def test_http_rejects_origin_and_validates_base():
+    try:
+        from fastapi.testclient import TestClient
+        from app.main import app
+    except ModuleNotFoundError as exc:  # stdlib puro (sem fastapi): pula o teste HTTP
+        print(f"  (skip de teste HTTP: {exc})")
+        return
+    client = TestClient(app)
+    # Origin sempre 403 (navegador não fala com este serviço)
+    resp = client.get("/health", headers={"Origin": "https://evil.example"})
+    assert resp.status_code == 403, resp.status_code
+    assert resp.json()["error"]["type"] == "permission_error"
+    # base do header respeitada e valida
+    resp = client.get("/health")
+    assert resp.status_code == 200, resp.status_code
+    # header malformado => 400 em formato Anthropic, sem tocar na rede
+    payload = {"model": "claude-sonnet-5", "max_tokens": 1, "messages": [{"role": "user", "content": "oi"}]}
+    resp = client.post("/v1/messages", json=payload,
+                       headers={"X-9Router-Upstream-Base": "file:///etc/passwd"})
+    assert resp.status_code == 400, (resp.status_code, resp.text)
+    body = resp.json()
+    assert body["type"] == "error" and body["error"]["type"] == "invalid_request_error", body
 
 
 def test_request_conversion_shape():

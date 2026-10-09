@@ -6,13 +6,13 @@ import logging
 import traceback
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
 from app.converter import (
     anthropic_to_openai_request,
     openai_to_anthropic_response,
     openai_to_anthropic_sse_stream,
     TARGET_MODELS
 )
+from app.routing import HEADER_BASE, HEADER_NAME, InvalidUpstreamBase, browser_origin_rejected, resolve_upstream_base
 
 # Configure logging to stdout with clear formatting
 logging.basicConfig(
@@ -24,13 +24,16 @@ logger = logging.getLogger("anthropic_proxy")
 
 app = FastAPI(title="Anthropic Compatible API Proxy", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+@app.middleware("http")
+async def reject_browser_origin(request: Request, call_next):
+    if browser_origin_rejected(request.headers.get("Origin")):
+        return JSONResponse(
+            status_code=403,
+            content={"type": "error", "error": {"type": "permission_error",
+                                                "message": "origin is not allowed"}},
+        )
+    return await call_next(request)
 
 UPSTREAM_BASE_URL = os.getenv("UPSTREAM_BASE_URL", "http://127.0.0.1:20338/v1").rstrip("/")
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-5")
@@ -42,21 +45,32 @@ async def health_check():
 
 CLAUDE_ALIASES = [
     "claude-sonnet-5",
-    "claude-haiku-4-5-20251001",
+    "claude-haiku-5-5",
     "claude-opus-5"
 ]
 
 
+def invalid_request(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={"type": "error", "error": {"type": "invalid_request_error", "message": message}},
+    )
+
+
 @app.get("/v1/models")
 @app.get("/models")
-async def list_models():
+async def list_models(request: Request):
     """Proxy /v1/models returning Anthropic standard IDs first to satisfy client validation."""
-    logger.info(f"Fetching models from upstream {UPSTREAM_BASE_URL}/models")
+    try:
+        base = resolve_upstream_base(request.headers.get(HEADER_BASE), UPSTREAM_BASE_URL)
+    except InvalidUpstreamBase as exc:
+        return invalid_request(str(exc))
+    logger.info(f"Fetching models from upstream {base}/models (via {request.headers.get(HEADER_NAME) or 'env'})")
     raw_models = []
     
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{UPSTREAM_BASE_URL}/models")
+            resp = await client.get(f"{base}/models")
             if resp.status_code == 200:
                 data = resp.json()
                 raw_models = data.get("data", []) or data.get("models", [])
@@ -140,7 +154,7 @@ async def create_message(request: Request):
         logger.error(f"Failed to parse incoming JSON body: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    requested_model = body.get("model", DEFAULT_MODEL)
+    requested_model = body.get("model") or DEFAULT_MODEL
     is_stream = body.get("stream", False)
     
     logger.info(f"========== INCOMING ANTHROPIC REQUEST ==========")
@@ -168,9 +182,14 @@ async def create_message(request: Request):
         headers["Authorization"] = f"Bearer {api_key_header}"
 
     client = httpx.AsyncClient(timeout=120.0)
-    upstream_url = f"{UPSTREAM_BASE_URL}/chat/completions"
-    
-    logger.info(f"Forwarding request to upstream: POST {upstream_url}")
+    try:
+        base = resolve_upstream_base(request.headers.get(HEADER_BASE), UPSTREAM_BASE_URL)
+    except InvalidUpstreamBase as exc:
+        logger.error(f"Rejected upstream base header: {exc}")
+        return invalid_request(str(exc))
+    upstream_url = f"{base}/chat/completions"
+
+    logger.info(f"Forwarding request to upstream: POST {upstream_url} (via {request.headers.get(HEADER_NAME) or 'env'})")
 
     if is_stream:
         try:

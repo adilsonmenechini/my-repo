@@ -1,0 +1,45 @@
+{
+  "master": {
+    "name": "master",
+    "host": "localhost:20228",
+    "password": "123456"
+  },
+  "defaults": {
+    "models": [
+      "oc/step-5-preview-free",
+      "oc/nemotron-3.5-lightning-free"
+    ],
+    "combos": [
+      {
+        "name": "claude-opus-5",
+        "models": [
+          "oc/step-5-preview-free",
+          "oc/nemotron-3.5-lightning-free"
+        ]
+      }
+    ],
+    "publish": [
+      "claude-opus-5"
+    ]
+  },
+  "slaves": [
+    {
+      "name": "rs000",
+      "host": "localhost:20129",
+      "docker_host": "9router-slave-000:20129",
+      "password": "123456"
+    },
+    {
+      "name": "rs001",
+      "host": "localhost:20130",
+      "docker_host": "9router-slave-001:20130",
+      "password": "123456"
+    },
+    {
+      "name": "rs002",
+      "host": "localhost:20131",
+      "docker_host": "9router-slave-002:20131",
+      "password": "123456"
+    }
+  ]
+}
